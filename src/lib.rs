@@ -1,14 +1,27 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
-}
+#![allow(unused)]
+
+mod circuit;
+mod commitment;
+mod constraint;
+mod field_element;
+mod proof;
+mod prover;
+mod signal;
+mod verifier;
+mod witness;
+
+pub use circuit::Circuit;
+pub use commitment::Commitment;
+pub use constraint::{Constraint, Operation};
+pub use field_element::FieldElement;
+pub use proof::Proof;
+pub use prover::Prover;
+pub use signal::Signal;
+pub use verifier::Verifier;
+pub use witness::Witness;
 
 #[cfg(test)]
-mod tests {
-    use super::*;
+mod tests;
 
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
-}
+// FIXME: A prime number in the thousands for now. Is this enough?
+const PRIME: u128 = 7489;
