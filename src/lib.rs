@@ -3,6 +3,7 @@
 mod circuit;
 mod commitment;
 mod constraint;
+mod dsl;
 mod field_element;
 mod proof;
 mod prover;
@@ -13,6 +14,7 @@ mod witness;
 pub use circuit::Circuit;
 pub use commitment::Commitment;
 pub use constraint::{Constraint, Operation};
+pub use dsl::*;
 pub use field_element::FieldElement;
 pub use proof::Proof;
 pub use prover::Prover;
