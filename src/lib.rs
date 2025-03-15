@@ -26,4 +26,4 @@ pub use witness::Witness;
 mod tests;
 
 // FIXME: A prime number in the thousands for now. Is this enough?
-const PRIME: u128 = 7489;
+pub const PRIME: u128 = 7489;
