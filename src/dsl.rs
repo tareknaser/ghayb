@@ -47,19 +47,16 @@ macro_rules! constraint {
 /// Usage:
 /// ```ignore
 ///   circuit! {
-///       inputs = [x, y],
-///       outputs = [out],
+///       [x] -> [out],
 ///       constraints = [
-///           constraint!((w@Witness + x@Input) -> tmp@Witness),
-///           constraint!((tmp@Witness * y@Input) -> out@Output)
+///           constraint!((w@Witness + x@Input) -> out@Output)
 ///       ]
 ///   }
 /// ```
 #[macro_export]
 macro_rules! circuit {
     (
-        inputs = [ $( $inp:ident ),* $(,)? ],
-        outputs = [ $( $out:ident ),* $(,)? ],
+        [ $( $inp:ident ),* $(,)? ] -> [ $( $out:ident ),* $(,)? ],
         constraints = [ $( $c:expr ),* $(,)? ]
     ) => {
         {
@@ -77,7 +74,7 @@ macro_rules! circuit {
 
             let _constraints = vec![
                 $(
-                    $c,  // Each $c is a constraint from constraint!(...)
+                    $c,
                 )*
             ];
 
