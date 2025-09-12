@@ -1,0 +1,380 @@
+\documentclass{article}
+\usepackage{amsmath, amssymb, listings, xcolor}
+\usepackage{hyperref}
+
+\usepackage{color}
+\usepackage{listings}
+\definecolor{GrayCodeBlock}{RGB}{241,241,241}
+\definecolor{BlackText}{RGB}{110,107,94}
+\definecolor{RedTypename}{RGB}{182,86,17}
+\definecolor{GreenString}{RGB}{96,172,57}
+\definecolor{PurpleKeyword}{RGB}{184,84,212}
+\definecolor{GrayComment}{RGB}{170,170,170}
+\definecolor{GoldDocumentation}{RGB}{180,165,45}
+\lstdefinelanguage{rust}
+{
+    columns=fullflexible,
+    keepspaces=true,
+    breaklines=true,
+    frame=single,
+    framesep=0pt,
+    framerule=0pt,
+    framexleftmargin=4pt,
+    framexrightmargin=4pt,
+    framextopmargin=5pt,
+    framexbottommargin=3pt,
+    xleftmargin=4pt,
+    xrightmargin=4pt,
+    backgroundcolor=\color{GrayCodeBlock},
+    basicstyle=\ttfamily\color{BlackText},
+    keywords={
+        true,false,
+        unsafe,async,await,move,
+        use,pub,crate,super,self,mod,
+        struct,enum,fn,const,static,let,mut,ref,type,impl,dyn,trait,where,as,
+        break,continue,if,else,while,for,loop,match,return,yield,in
+    },
+    keywordstyle=\color{PurpleKeyword},
+    ndkeywords={
+        bool,u8,u16,u32,u64,u128,i8,i16,i32,i64,i128,char,str,
+        Self,Option,Some,None,Result,Ok,Err,String,Box,Vec,Rc,Arc,Cell,RefCell,HashMap,BTreeMap,
+        macro_rules
+    },
+    ndkeywordstyle=\color{RedTypename},
+    comment=[l][\color{GrayComment}\slshape]{//},
+    morecomment=[s][\color{GrayComment}\slshape]{/*}{*/},
+    morecomment=[l][\color{GoldDocumentation}\slshape]{///},
+    morecomment=[s][\color{GoldDocumentation}\slshape]{/*!}{*/},
+    morecomment=[l][\color{GoldDocumentation}\slshape]{//!},
+    morecomment=[s][\color{RedTypename}]{\#![}{]},
+    morecomment=[s][\color{RedTypename}]{\#[}{]},
+    stringstyle=\color{GreenString},
+    string=[b]"
+}
+
+\begin{document}
+
+
+\section{Semantics of \texttt{verify!}}
+
+The \texttt{verify!} macro is responsible for checking whether a given proof correctly satisfies the circuit constraints
+
+\begin{lstlisting}[language=rust, caption={Macro Definition}]
+verify!(circuit_expr, [public_inputs...], proof_expr)
+\end{lstlisting}
+
+The macro expands into:
+\begin{lstlisting}[language=rust]
+Verifier::verify(&circuit_expr, &[public_inputs...], &proof_expr)
+\end{lstlisting}
+
+
+
+\begin{lstlisting}[language=rust, caption={Verification Function}]
+pub fn verify(circuit: &Circuit, public_inputs: &[FieldElement], proof: &Proof) -> bool {
+    if !Self::check_commitments(&proof.commitments, &proof.revealed_witness) {
+        return false;
+    }
+    let mut value_map: HashMap<String, FieldElement> = HashMap::new();
+    for (name, (val, _blinding)) in &proof.revealed_witness {
+        value_map.insert(name.clone(), val.clone());
+    }
+    for (i, sig) in circuit.inputs.iter().enumerate() {
+        if let Some(pub_val) = public_inputs.get(i) {
+            if let Signal::Input(ref name) = sig {
+                value_map.insert(name.clone(), pub_val.clone());
+            }
+        }
+    }
+    if !Self::constraints_satisfied(&circuit.constraints, &mut value_map) {
+        return false;
+    }
+    true
+}
+\end{lstlisting}
+
+
+
+
+\subsection{Background}
+
+\begin{lstlisting}[language=rust]
+pub struct Circuit {
+    pub inputs: Vec<Signal>,
+    pub outputs: Vec<Signal>,
+    pub constraints: Vec<Constraint>,
+}
+\end{lstlisting}
+
+\begin{lstlisting}[language=rust]
+pub struct Proof {
+    pub commitments: HashMap<String, Commitment>,
+    pub revealed_witness: HashMap<String, (FieldElement, FieldElement)>,
+}
+\end{lstlisting}
+
+\begin{equation}
+\mathcal{V} : C \times I \times P \to \{ \text{true}, \text{false} \}
+\end{equation}
+where:
+\[
+\begin{aligned}
+    &\mathbb{C} \text{ is a circuit.} \\
+    &\mathbb{I} \text{ is a set of public inputs.} \\
+    &\mathbb{P} \text{ is a proof (commitments + revealed witness values).} \\
+    &\text{The function outputs } \texttt{true} \text{ if verification succeeds, and } \texttt{false} \text{ otherwise.}
+\end{aligned}
+\]
+
+\section{Semantics}
+
+\subsection{Extract Circuit Components}
+Given a circuit $C$, extract:
+\begin{align*}
+    \mathbb{I} & : \text{set of public input signals},\\
+    \mathbb{O} & : \text{set of output signals},\\
+    \mathbb{C} & : \text{set of constraints}.
+\end{align*}
+
+Semantics:
+\begin{equation}
+    C = (\mathbb{I}, \mathbb{O}, \mathbb{C})
+\end{equation}
+
+\subsection{Extract Proof Components}
+Given a proof $P$, extract:
+\begin{align*}
+    \mathbb{K} & : \text{set of commitments},\\
+    \mathbb{R} & : \text{set of revealed witness values}.
+\end{align*}
+
+Semantics:
+\begin{equation}
+    P = (\mathbb{K}, \mathbb{R})
+\end{equation}
+
+\subsection{Check Commitments}
+
+\begin{lstlisting}[language=rust, caption={Check Commitments}]
+fn check_commitments(
+    commitments: &HashMap<String, Commitment>,
+    revealed_witness: &HashMap<String, (FieldElement, FieldElement)>,
+) -> bool {
+    if commitments.len() != revealed_witness.len() {
+        return false;
+    }
+    for (name, (val, blind)) in revealed_witness.iter() {
+        let recomputed = Commitment::new(val, blind);
+        if commitments.get(name).map_or(true, |c| recomputed.committed_hash != c.committed_hash) {
+            return false;
+        }
+    }
+    true
+}
+....
+impl Commitment {
+    /// C = SHA256( val_bytes || blind_bytes || prime_bytes )
+    pub fn new(val: &FieldElement, blinding: &FieldElement) -> Self {
+        let val_bytes = val.value.to_le_bytes();
+        let blind_bytes = blinding.value.to_le_bytes();
+
+        let mut hasher = Sha256::new();
+        hasher.update(&val_bytes);
+        hasher.update(&blind_bytes);
+        hasher.update(&val.prime.to_le_bytes());
+
+        let result = hasher.finalize();
+        Self {
+            committed_hash: result.to_vec(),
+        }
+    }
+}
+
+\end{lstlisting}
+
+For each revealed witness $(s, w_s, r_s) \in \mathbb{R}$, verify:
+\begin{equation}
+    H(w_s, r_s, p) = \mathbb{K}(s)
+\end{equation}
+where $H$ is the cryptographic hash function.
+\subsection{Construct Value Map}
+
+Build a value map \(\sigma\) mapping signal names to field elements.
+
+\begin{itemize}
+    \item \textbf{Add public inputs:}
+    \[
+        \sigma(s) = v, \quad \forall s \in \mathbb{I}, v \in \mathbb{I}
+    \]
+    \item \textbf{Add revealed witness values:}
+    \[
+        \sigma(s) = w_s, \quad \forall (s, w_s, r_s) \in \mathbb{R}
+    \]
+\end{itemize}
+
+This results in a mapping:
+
+\[
+\sigma : S \to \mathbb{F}_p
+\]
+
+\subsection{Evaluate Constraints}
+
+\begin{lstlisting}[language=rust, caption={Evaluate Constraints}]
+fn constraints_satisfied(
+    constraints: &[Constraint],
+    value_map: &mut HashMap<String, FieldElement>,
+) -> bool {
+    for constraint in constraints {
+        let left_val = Self::eval_signal(&constraint.left, value_map).unwrap();
+        let right_val = Self::eval_signal(&constraint.right, value_map).unwrap();
+        let result = match constraint.operation {
+            Operation::Add => left_val.add(&right_val),
+            Operation::Mul => left_val.mul(&right_val),
+            Operation::Sub => left_val.sub(&right_val),
+            Operation::Eq => {
+                if !left_val.equals(&right_val) {
+                    return false;
+                }
+                left_val.clone()
+            }
+        };
+        match &constraint.output {
+            Signal::Output(ref nm) | Signal::Witness(ref nm) => {
+                value_map.insert(nm.clone(), result);
+            }
+            _ => {}
+        }
+    }
+    true
+}
+\end{lstlisting}
+
+For each constraint $(s_1 \oplus s_2 \to s_3) \in \mathbb{C}$:
+\begin{align*}
+v_1 &= \sigma(s_1), \quad v_2 = \sigma(s_2),\\
+v_3 &= v_1 \oplus v_2 \mod p,\\
+    \sigma(s_3) &\stackrel{?}{=} v_3.
+\end{align*}
+If any constraint fails, return \texttt{false}.
+
+\subsection{Return Verification Result}
+\begin{equation}
+\mathcal{V}(C, I, P) = \begin{cases} 
+    \text{true}, & \text{if commitments and constraints hold} \\ 
+    \text{false}, & \text{otherwise} 
+\end{cases}
+\end{equation}
+
+
+\section{Using Inference Rules}
+
+We define \texttt{verify!} as a judgment:
+
+\[
+C, I, P \Downarrow \text{true} \quad \text{(if verification succeeds)}
+\]
+
+\[
+C, I, P \Downarrow \text{false} \quad \text{(if verification fails)}
+\]
+
+Where:
+
+\begin{itemize}
+    \item $\mathbb{C}$ is the circuit (constraints, inputs, outputs).
+    \item $\mathbb{I}$ is the set of public inputs.
+    \item $\mathbb{P}$ is the proof (commitments + revealed witnesses).
+    \item The output is \texttt{true} if verification succeeds, otherwise \texttt{false}.
+\end{itemize}
+
+\subsection{(1) Commitment Check}
+
+\[
+\frac{ \forall (s, w_s, r_s) \in P.\mathbb{R}, \quad H(w_s, r_s, p) = P.\mathbb{K}(s) }
+{ P \Downarrow_{\text{commit}} \text{true} }
+\]
+
+If all revealed witness values $(w_s, r_s)$ correctly match their commitments $H(w_s, r_s, p)$, the commitment check passes.
+
+Otherwise:
+
+\[
+\frac{ \exists (s, w_s, r_s) \in P.\mathbb{R}, \quad H(w_s, r_s, p) \neq P.\mathbb{K}(s) }
+{ P \Downarrow_{\text{commit}} \text{false} }
+\]
+
+If any commitment check fails, verification fails immediately.
+
+
+\subsection{(2) Construct Value Map $\sigma$}
+
+\[
+\frac{ \sigma = \{ s \mapsto v \mid s \in \mathbb{I}, v \in I \} \cup \{ s \mapsto w_s \mid (s, w_s, r_s) \in P.\mathbb{R} \} }
+{ (C, P) \Downarrow_{\text{map}} \sigma }
+\]
+
+The value map $\sigma$ is built by:
+
+\begin{itemize}
+    \item Assigning public input values $v$ to input signals $s$.
+    \item Assigning revealed witness values $w_s$ to witness signals $s$.
+\end{itemize}
+
+This map $\sigma$ will be used for constraint evaluation.
+
+
+\subsection{(3) Constraint Satisfaction}
+
+For each constraint $(s_1 \oplus s_2 \to s_3) \in \mathbb{C}$:
+
+\[
+\frac{ \sigma(s_1) = v_1, \quad \sigma(s_2) = v_2, \quad v_3 = v_1 \oplus v_2 \mod p, \quad \sigma(s_3) = v_3 }
+{ \mathbb{C}, \sigma \Downarrow_{\text{constraints}} \text{true} }
+\]
+
+Meaning:
+
+\begin{enumerate}
+    \item Values of $s_1$ and $s_2$ are retrieved from $\sigma$.
+    \item The operation $\oplus$ is applied to compute $v_3$.
+    \item The computed result $v_3$ matches $\sigma(s_3)$.
+\end{enumerate}
+
+If any constraint fails:
+
+\[
+\frac{ \sigma(s_3) \neq v_3 }
+{ \mathbb{C}, \sigma \Downarrow_{\text{constraints}} \text{false} }
+\]
+
+then verification fails.
+
+
+\subsection{Final Rule: Complete Verification}
+
+\[
+\frac{ P \Downarrow_{\text{commit}} \text{true}, \quad (C, P) \Downarrow_{\text{map}} \sigma, \quad \mathbb{C}, \sigma \Downarrow_{\text{constraints}} \text{true} }
+{ C, I, P \Downarrow \text{true} }
+\]
+
+If all three steps succeed (commitment check, value mapping, and constraint verification), then the proof is valid, and \texttt{verify!} returns true.
+
+Otherwise:
+
+\[
+\frac{ P \Downarrow_{\text{commit}} \text{false} \quad \text{or} \quad \mathbb{C}, \sigma \Downarrow_{\text{constraints}} \text{false} }
+{ C, I, P \Downarrow \text{false} }
+\]
+
+If either:
+
+\begin{itemize}
+    \item A commitment check fails, or
+    \item A constraint evaluation fails,
+\end{itemize}
+
+then verification fails, and \texttt{verify!} returns false.
+
+
+\end{document}
